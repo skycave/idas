@@ -1,0 +1,67 @@
+---
+title: "Applied Data Analytics" 
+subtitle: "Homework 1 --- Due: September 28, 2025, 10 p.m."
+author: "Your ID / Your Name"
+format: html
+---
+
+## Problem 1 (25 points) -- AB Testing 
+
+
+Perform (i) two-proportion z-test and (ii) Chi-square test to calculate the p-value for the difference between A and B. Then interpret the result using a standard significance level (alpha) of 0.05.
+
+| Variant        | Sessions | Conversions | Conversion Rate |
+|----------------|----------|-------------|-----------------|
+| A (Control)    | 4912     | 127         | 2.59%           |
+| B (Treatment)  | 4866     | 78          | 1.60%           |
+
+You should complete the following code:
+
+```{python}
+from statsmodels.stats.proportion import proportions_ztest
+from scipy.stats import chi2_contingency
+
+## perform z-test and Chi-square tests
+```
+
+
+## Problem 2 (25 points) -- Coin Toss Simulation 
+
+Simulate flipping a fair coin where "heads = 1" and "tails = 0." Take random samples of size `n = 5, 10, 100`, compute their means, and repeat this 1000 thousands. Display how the distribution of sample means approaches a normal distribution as `n` grows.
+
+## Problem 3 (25 points) -- Function Minimization 
+
+Consider the function
+$$
+f(x) = x^4 - 4x
+$$
+
+```{python}
+#| echo: FALSE
+#| warning: FALSE
+import numpy as np
+import matplotlib.pyplot as plt
+
+def f(x):
+    return x**4 - 4*x
+
+x = np.linspace(-5, 5, 400)
+y = f(x)
+
+plt.plot(x, y)
+plt.xlabel('x')
+plt.ylabel('f(x)')
+plt.legend()
+plt.grid(True)
+plt.show()
+```
+
+
+(a) Use `scipy.optimize.minimize` or `scipy.optimize.minimize_scalar` to find a local minimum of  $f(x)$. 
+
+(b) Apply the Newton-Raphson method to minimize $f(x)$. 
+
+(c) Apply the gradient descent method to minimize $f(x)$.
+
+
+```{python}
