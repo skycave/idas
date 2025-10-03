@@ -1,0 +1,364 @@
+---
+title: "Applied Data Analytics"
+subtitle: "Chapter 5. Dealing with Missing Data"
+author: "Sangbum Choi, Ph.D."  
+format:
+  html:
+    toc: false
+    number-sections: false
+jupyter: python3
+execute:
+  echo: true
+  warning: false
+  message: false
+fig-width: 6
+fig-height: 4
+fig-align: center
+---
+
+
+
+
+# Missing Data Imputation 
+
+
+This class notebook bundles:
+
+1. **Simulation (Section 1)** — Why naive imputation (0 / mean) can distort structure under MAR missingness.  
+2. **Multiple Imputation (Section 2)** — MICE-like imputation with **Rubin's rules** for pooled estimates and standard errors.  
+3. **Cheatsheet (Section 3)** — Useful Python snippets for missing-data workflows.
+
+
+
+## Learning Goals
+- Understand how MAR missingness can bias complete-case analysis and naive imputations.
+- Implement and interpret **Multiple Imputation** (IterativeImputer with `sample_posterior=True`).
+- Apply Rubin's rules to pool estimates across multiple imputations.
+- Know practical Python utilities (`pandas`, `scikit-learn`) for handling missing data.
+
+
+## Section 1 — Simulation: Why 0/Mean imputation can distort structure
+
+We simulate correlated predictors $(X_1, X_2)$ and an outcome $y$ with a linear data-generating process. Then we induce **MAR** missingness in $X_2$ based on $X_1$.  
+
+We compare:
+- **Complete-case** correlation and regression
+- **Zero imputation** for $X_2$
+- **Mean imputation** for $X_2$
+and visualize how coefficients deviate from the truth.
+
+```{python}
+# -----------------------------
+# SECTION 1: SIMULATION & NAIVE IMPUTATION
+# -----------------------------
+# This section:
+# 1) Simulates correlated predictors X1, X2 and an outcome y following a linear model.
+# 2) Induces MAR missingness in X2 depending on X1.
+# 3) Compares complete-case analysis vs. zero- and mean-imputation.
+# 4) Shows correlation distortion and regression coefficient bias.
+#
+# All steps include detailed comments for teaching purposes.
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LinearRegression
+
+# ----- 1. Simulation settings -----
+np.random.seed(42)          # For reproducibility
+n = 2000                    # Sample size
+mean = [0, 0]               # Mean vector for (X1, X2)
+cov = [[1, 0.7],            # Covariance matrix -> Corr(X1, X2) ~ 0.7
+       [0.7, 1]]
+
+# Draw n samples from a bivariate normal with the above parameters.
+X = np.random.multivariate_normal(mean, cov, size=n)
+X1, X2 = X[:, 0], X[:, 1]   # Split into two arrays
+
+# True linear model parameters: y = beta0 + beta1 * X1 + beta2 * X2 + eps
+beta0, beta1, beta2 = 0.5, 1.0, 2.0
+eps = np.random.normal(0, 1, size=n)    # Noise term epsilon ~ N(0, 1)
+y = beta0 + beta1 * X1 + beta2 * X2 + eps
+
+# Assemble into a pandas DataFrame for convenience.
+df = pd.DataFrame({'X1': X1, 'X2': X2, 'y': y})
+
+# ----- 2. Induce MAR missingness in X2 -----
+# We make X2 more likely to be missing when X1 is large. This creates a MAR pattern:
+# P(Missing in X2 | X1) depends on observed X1, not on unobserved X2 directly.
+logit = (X1 - np.quantile(X1, 0.5)) * 3  # Center at median of X1, scale for steeper slope
+prob_miss = 1 / (1 + np.exp(-logit))     # Convert to probabilities via logistic function
+mask = np.random.binomial(1, prob_miss, size=n).astype(bool)  # Missing indicator
+
+df_mar = df.copy()
+df_mar.loc[mask, 'X2'] = np.nan          # Set X2 to NaN where mask is True
+
+# Quick diagnostics: missing rate and correlations
+print('Missing rate in X2:', round(df_mar['X2'].isna().mean(), 4))
+print('True corr(X1,X2):', round(np.corrcoef(df['X1'], df['X2'])[0,1], 4))
+print('Observed corr (drop NaNs):', round(np.corrcoef(df_mar.dropna()['X1'], df_mar.dropna()['X2'])[0,1], 4))
+
+# ----- 3. Naive imputations for X2 -----
+# (a) Zero imputation: replacing missing X2 with 0 can heavily distort its distribution.
+df_zero = df_mar.copy()
+df_zero['X2'] = df_zero['X2'].fillna(0.0)
+
+# (b) Mean imputation: replacing missing X2 with the mean of observed X2 shrinks variance
+# and typically weakens correlation (and may bias regression coefficients).
+imp = SimpleImputer(strategy='mean')
+df_mean = df_mar.copy()
+df_mean['X2'] = imp.fit_transform(df_mean[['X2']])
+
+# Compare correlation estimates across methods
+corr_table = pd.DataFrame({
+    'Method': [
+        'True (no missing)',
+        'Drop NaNs (complete-case correlation)',
+        'Zero imputation',
+        'Mean imputation',
+    ],
+    'Corr(X1,X2)': [
+        np.corrcoef(df['X1'], df['X2'])[0, 1],
+        np.corrcoef(df_mar.dropna()['X1'], df_mar.dropna()['X2'])[0, 1],
+        np.corrcoef(df_zero['X1'], df_zero['X2'])[0, 1],
+        np.corrcoef(df_mean['X1'], df_mean['X2'])[0, 1],
+    ],
+})
+print('\nCorrelation comparison:')
+display(corr_table.round(4))
+
+# ----- 4. Linear regression comparison: estimate beta1, beta2 -----
+def fit_lr_complete_case(df_in):
+    """Fit LinearRegression on complete cases only and return coefficients (beta1, beta2)."""
+    m = df_in.dropna()                          # Keep rows where X2 is observed
+    Xmat = m[['X1', 'X2']].values               # Design matrix
+    yvec = m['y'].values
+    reg = LinearRegression().fit(Xmat, yvec)
+    return reg.coef_                            # Returns array [beta1_hat, beta2_hat]
+
+# (i) Complete-case
+cc_beta = fit_lr_complete_case(df_mar)
+
+# (ii) Zero imputation: fit on the filled data
+zi_beta = LinearRegression().fit(df_zero[['X1','X2']], df_zero['y']).coef_
+
+# (iii) Mean imputation: fit on the filled data
+mi_beta = LinearRegression().fit(df_mean[['X1','X2']], df_mean['y']).coef_
+
+coef_table = pd.DataFrame({
+    'Method': ['True (reference)', 'Complete-case', 'Zero imp.', 'Mean imp.'],
+    'beta1_hat': [beta1, cc_beta[0], zi_beta[0], mi_beta[0]],
+    'beta2_hat': [beta2, cc_beta[1], zi_beta[1], mi_beta[1]],
+})
+print('\nRegression coefficient estimates:')
+display(coef_table.round(4))
+
+# ----- 5. Visualization: bar charts for beta1 and beta2 -----
+labels = ['Complete-case', 'Zero', 'Mean']
+b1 = [cc_beta[0], zi_beta[0], mi_beta[0]]
+b2 = [cc_beta[1], zi_beta[1], mi_beta[1]]
+
+# Plot for beta1
+plt.figure()
+plt.axhline(y=beta1, linestyle='--')     # horizontal line at true beta1
+plt.bar(range(len(labels)), b1, tick_label=labels)
+plt.title('Estimate of beta1 (true = 1.0)')
+plt.tight_layout()
+plt.show()
+
+# Plot for beta2
+plt.figure()
+plt.axhline(y=beta2, linestyle='--')     # horizontal line at true beta2
+plt.bar(range(len(labels)), b2, tick_label=labels)
+plt.title('Estimate of beta2 (true = 2.0)')
+plt.tight_layout()
+plt.show()
+```
+
+
+
+
+## Section 2 — Multiple Imputation (MICE-like) with Rubin's Pooling
+
+We now perform **Multiple Imputation** using `IterativeImputer(sample_posterior=True)` to generate `m` imputed datasets. 
+
+For each imputed dataset, we fit the same linear regression and compute approximate coefficient variances.  
+
+Finally, we pool point estimates and variances via **Rubin's rules**:
+$$
+\bar Q = \frac{1}{m} \sum Q_i, \quad
+\bar U = \frac{1}{m} \sum U_i, \quad
+B = \frac{1}{m-1} \sum (Q_i - \bar Q)^2, \quad
+T = \bar U + \left(1 + \frac{1}{m}\right)B, \quad
+\text{SE} = \sqrt{T}.
+$$
+
+```{python}
+# -----------------------------
+# SECTION 2: MULTIPLE IMPUTATION (MICE-like) + RUBIN'S RULES
+# -----------------------------
+# We reuse df_mar (with MAR missingness) generated in Section 1.
+# Steps:
+# 1) Create m imputed datasets with IterativeImputer (sample_posterior=True).
+# 2) Fit LinearRegression on each imputed dataset.
+# 3) Approximate Var(beta) using sigma^2 * (X'X)^{-1}.
+# 4) Pool estimates & SE via Rubin's rules.
+#
+# NOTE: IterativeImputer is experimental in scikit-learn; enabling import is required.
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+from sklearn.experimental import enable_iterative_imputer  # noqa: F401 (enable IterativeImputer)
+from sklearn.impute import IterativeImputer
+from sklearn.linear_model import LinearRegression
+
+def rubins_rules(estimates, variances):
+    """
+    Apply Rubin's rules to pool estimates across multiple imputations.
+    Parameters
+    ----------
+    estimates : array-like of shape (m, p)
+        Coefficient estimates from each imputed dataset.
+    variances : array-like of shape (m, p)
+        Estimated variances (per coefficient) from each imputed dataset.
+    Returns
+    -------
+    pooled_est : array of shape (p,)
+        Pooled point estimates.
+    pooled_se : array of shape (p,)
+        Pooled standard errors (sqrt of total variance).
+    """
+    est = np.asarray(estimates)
+    var = np.asarray(variances)
+    m = est.shape[0]
+
+    Q_bar = est.mean(axis=0)          # mean of estimates
+    U_bar = var.mean(axis=0)          # within-imputation variance
+    B = est.var(axis=0, ddof=1)       # between-imputation variance
+    T = U_bar + (1 + 1/m) * B         # total variance
+    pooled_se = np.sqrt(T)
+    return Q_bar, pooled_se
+
+# Number of imputations
+m = 5
+rng = np.random.RandomState(2025)
+
+estimates = []   # rows: imputations; cols: [beta1, beta2]
+variances = []   # rows: imputations; cols: [Var(beta1), Var(beta2)]
+
+for j in range(m):
+    # IterativeImputer builds conditional models for each feature with missing values
+    it = IterativeImputer(
+        random_state=rng.randint(0, 10**6),
+        max_iter=10,
+        sample_posterior=True,   # draw from posterior -> reflect imputation uncertainty
+        skip_complete=True       # skip columns without missing values
+    )
+    imputed = df_mar.copy()      # df_mar from Section 1
+    imputed[['X1','X2','y']] = it.fit_transform(imputed[['X1','X2','y']])
+
+    # Fit linear regression on the imputed dataset
+    Xmat = imputed[['X1','X2']].to_numpy()
+    yvec = imputed['y'].to_numpy()
+    reg = LinearRegression().fit(Xmat, yvec)
+    beta_hat = np.array(reg.coef_)  # [beta1_hat, beta2_hat]
+
+    # Approximate Var(beta) using sigma^2 * (X'X)^{-1}
+    yhat = reg.predict(Xmat)
+    resid = yvec - yhat
+    sigma2 = (resid @ resid) / (len(yvec) - Xmat.shape[1])
+    XtX_inv = np.linalg.inv(Xmat.T @ Xmat)
+    var_beta = np.diag(sigma2 * XtX_inv)  # [Var(beta1), Var(beta2)]
+
+    estimates.append(beta_hat)
+    variances.append(var_beta)
+
+estimates = np.vstack(estimates)
+variances = np.vstack(variances)
+
+pooled_est, pooled_se = rubins_rules(estimates, variances)
+
+# Report
+print('Imputation-specific estimates (rows=imputations, cols=[beta1,beta2]):')
+print(np.round(estimates, 4))
+
+print('\nPooled estimate [beta1, beta2]:', np.round(pooled_est, 4))
+print('Pooled SE      [beta1, beta2]:', np.round(pooled_se, 4))
+print('True [beta1, beta2]:', [1.0, 2.0])
+
+# Simple comparison plots: MI pooled vs True
+labels = ['MI pooled', 'True']
+b1_vals = [pooled_est[0], 1.0]
+b2_vals = [pooled_est[1], 2.0]
+
+plt.figure()
+plt.bar(range(len(labels)), b1_vals, tick_label=labels)
+plt.title('beta1: MI pooled vs True')
+plt.tight_layout()
+plt.show()
+
+plt.figure()
+plt.bar(range(len(labels)), b2_vals, tick_label=labels)
+plt.title('beta2: MI pooled vs True')
+plt.tight_layout()
+plt.show()
+```
+
+
+## Section 3 — Python Cheatsheet for Missing Data
+
+Copy/paste as needed. Most lines are **commented**; uncomment to run in your own workflow.
+
+```{python}
+# --- Pandas basics ---
+# Count missing by column
+# df.isna().sum()
+
+# Inspect dtypes (object dtype can hide empty strings)
+# df.dtypes
+
+# Simple fills
+# df['col'].fillna(0)                # constant fill
+# df['col'].fillna(df['col'].mean()) # mean fill (be careful under MAR/MNAR)
+
+# Time-series interpolation
+# df.interpolate()
+
+# Drop rows with NaN in selected columns
+# df.dropna(subset=['col1','col2'])
+
+# --- scikit-learn imputers ---
+from sklearn.impute import SimpleImputer, KNNImputer
+from sklearn.experimental import enable_iterative_imputer  # noqa: F401
+from sklearn.impute import IterativeImputer
+
+# SimpleImputer: 'mean', 'median', 'most_frequent', or constant
+# imp = SimpleImputer(strategy='mean')
+# X_imp = imp.fit_transform(X)
+
+# KNNImputer: nearest-neighbor-based imputation (numeric features)
+# knn = KNNImputer(n_neighbors=5)
+# X_imp = knn.fit_transform(X)
+
+# IterativeImputer (MICE-like): model each feature conditionally
+# it = IterativeImputer(max_iter=10, sample_posterior=True, random_state=0)
+# X_imp = it.fit_transform(X)
+
+# --- MissingIndicator: keep track of missingness as binary features ---
+from sklearn.impute import MissingIndicator
+# ind = MissingIndicator(features='missing-only')
+# miss_mask = ind.fit_transform(X)  # binary mask of missing entries
+
+# --- Pipeline example: impute + model in one reproducible object ---
+from sklearn.pipeline import Pipeline
+from sklearn.linear_model import LinearRegression
+# pipe = Pipeline([
+#     ('imputer', IterativeImputer(random_state=0, sample_posterior=True)),
+#     ('model', LinearRegression())
+# ])
+# pipe.fit(X_train, y_train)
+# y_pred = pipe.predict(X_test)
+```
