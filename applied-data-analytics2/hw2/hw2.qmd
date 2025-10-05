@@ -1,0 +1,41 @@
+---
+title: "Applied Data Analytics" 
+subtitle: "Homework 2 --- Due: October 19, 2025, 10 p.m."
+author: "Your ID / Your Name"
+format: html
+---
+
+## Problem 1 (25 points) -- Portfolio Optimization
+
+**Objective:** To construct and analyze a multi-asset portfolio by retrieving historical data, performing statistical analysis, and determining optimal asset allocations.
+
+(a) Data Retrieval and Descriptive Statistics:
+Using the tickers ['SPY', 'IEF', 'GLD', 'VNQ'], obtain five years of daily Adjusted Close price data. For each asset, calculate and report the annualized mean return and annualized volatility (standard deviation).
+
+(b) Correlation Analysis:
+Generate and present a heatmap of the portfolio's correlation matrix. Provide a brief commentary on the observed relationships between the assets.
+
+(c) Minimum Variance Portfolio (MVP):
+Calculate the Minimum Variance Portfolio (MVP) - the allocation that achieves the lowest possible risk. Report the portfolio's expected return, volatility, and asset weightings.
+
+(d) Efficient Frontier Visualization:
+Simulate a large number of random portfolios to plot the Efficient Frontier, displaying expected return against volatility. Clearly annotate the location of the MVP on the plot.
+
+## Problem 2 (25 points) -- Gaussian Mixture Models  
+
+**Objective:** Generate multi-cluster data and compare the performance of Gaussian Mixture Models (GMM) with K-Means clustering.
+
+(a) Data Generation:
+Create a synthetic 2D dataset with 600 samples and three distinct clusters. Sample from three different multivariate normal distributions. Ensure at least one cluster is elliptical (non-spherical). Plot the generated data, colored by their true cluster labels.
+
+(b) Gaussian Mixture Model (GMM):
+Fit a GMM with three components to the generated data.
+Print the model's estimated parameters : means, covariance matrices, and mixing weights. Create a new plot showing the data colored by the GMM's predicted cluster assignments.
+
+(c) K-Means Clustering:
+Apply the K-Means algorithm with $k=3$ to the same dataset.
+Create a plot showing the data colored by the K-Means cluster assignments.
+
+(d) Comparison & Analysis:
+Compare the two results visually with the original "true" plot.
+Which algorithm (GMM or K-Means) performed better on your specific dataset? 
